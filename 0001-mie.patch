@@ -1,0 +1,88 @@
+From 834acec818a39ebe4314baf5381476e75c05b9e2 Mon Sep 17 00:00:00 2001
+From: Mohamed Elawadi <mohamed@elawadi.net>
+Date: Sat, 28 May 2016 22:21:06 +0200
+Subject: [PATCH] mie
+
+---
+ RemoteFile.py | 14 ++++++++++++++
+ client.py     | 11 ++++++++---
+ example.py    |  5 +++++
+ 3 files changed, 27 insertions(+), 3 deletions(-)
+ create mode 100644 RemoteFile.py
+ create mode 100644 example.py
+
+diff --git a/RemoteFile.py b/RemoteFile.py
+new file mode 100644
+index 0000000..1b450eb
+--- /dev/null
++++ b/RemoteFile.py
+@@ -0,0 +1,14 @@
++import client
++
++class RemoteFile:
++    def __init__(self, filename, *args, *kwargs):
++        self.filename = filename
++        self.args = args
++        self.kwargs = kwargs
++    def __enter__(self):
++        o = client.demand_resource(self.filename)
++        o["lock"].acquire(timeout=kwargs['timeout'])
++    def __exit__(self):
++        client.release_resource(self.filename)
++    def read(self, n=0):
++        pass
+diff --git a/client.py b/client.py
+index 20dd7be..535b454 100644
+--- a/client.py
++++ b/client.py
+@@ -3,6 +3,7 @@ import json
+ import thread
+ import time
+ import sys
++import threading
+ 
+ 
+ myId = ""
+@@ -19,7 +20,8 @@ def on_message(ws, message):
+ 		if msgType == "use_resource":
+ 
+ 			if message['resource'] in resources :
+-				resources[message['resource']]={"locked" : False, "release_key": message['release_key']}
++                                resources[message['resource']]["lock"].releasse()
++				resources[message['resource']]["release_key"] = message['release_key']
+ 				status = "ok"
+ 			else :
+ 				status = "Fail"
+@@ -69,7 +71,10 @@ def run(*args):
+ 		
+ def demandResource(resource):
+ 	write_message({"type":"demand_resource","resource":resource,"client_id" : myId})
+-	resources[resource] = {"locked":True,"release_key":""}
++	lock = threading.Lock()
++        lock.acquire()
++	resources[resource] = {"lock":lock,"release_key":""}
++        return resources[resource]
+ 
+ def releaseResource(resource):
+ 	write_message({"type":"release_resource","resource":resource,"client_id" : myId , "release_key" : resources[resource]["release_key"]})
+@@ -84,4 +89,4 @@ if __name__ == "__main__":
+                                 on_message=on_message,
+                                 on_error=on_error,
+                                 on_close=on_close)
+-	ws.run_forever()
+\ No newline at end of file
++	ws.run_forever()
+diff --git a/example.py b/example.py
+new file mode 100644
+index 0000000..160f8c4
+--- /dev/null
++++ b/example.py
+@@ -0,0 +1,5 @@
++from RemoteFile import RemoteFile
++
++with RemoteFile as f:
++    f.read()
++
+-- 
+2.5.0
+

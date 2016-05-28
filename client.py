@@ -3,6 +3,7 @@ import json
 import thread
 import time
 import sys
+import threading
 
 
 myId = ""
@@ -19,7 +20,8 @@ def on_message(ws, message):
 		if msgType == "use_resource":
 
 			if message['resource'] in resources :
-				resources[message['resource']]={"locked" : False, "release_key": message['release_key']}
+                                resources[message['resource']]["lock"].releasse()
+				resources[message['resource']]["release_key"] = message['release_key']
 				status = "ok"
 			else :
 				status = "Fail"
@@ -69,7 +71,10 @@ def run(*args):
 		
 def demandResource(resource):
 	write_message({"type":"demand_resource","resource":resource,"client_id" : myId})
-	resources[resource] = {"locked":True,"release_key":""}
+	lock = threading.Lock()
+        lock.acquire()
+	resources[resource] = {"lock":lock,"release_key":""}
+        return resources[resource]
 
 def releaseResource(resource):
 	write_message({"type":"release_resource","resource":resource,"client_id" : myId , "release_key" : resources[resource]["release_key"]})
