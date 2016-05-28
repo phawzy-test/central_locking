@@ -8,11 +8,13 @@ websocket api for demanding resources
 3-demand resources and release it as much as you want through web ui
 
 
+
 p.s. you can implement your own websocket client in any language
 
 -currently implementing a python client
 
 central locking system : 
+
 	1-exclusive access on shared resources
 	
 	2-demand resources and release them
