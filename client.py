@@ -25,10 +25,7 @@ def on_message(ws, message):
 				status = "Fail"
 			
 			sentMsg = {"type" : "use_resource_response" , "resource" : message['resource'], "release_key" : message['release_key'],"client_id" : myId,"status" : status}
-			try:
-				write_message(sentMsg)
-			except Exception, e:
-				ws.close()
+			write_message(sentMsg)
 
 		elif msgType == "check_resource":
 			sentMsg={"resource":message['resource'],"client_id" : myId,"type":"check_resource_response","release_key" : resources[message['resource']]['release_key']}
@@ -39,13 +36,19 @@ def on_message(ws, message):
 
 		elif msgType == "error":
 			if message['status'] == "timeout":
+				if resource in resources :
+					del resources[resource] 
 				print "timeout on "+ message['resource']
 
 			elif message['status'] == "deadlock":
 				print "deadlock on "+message['resource']
 
 def write_message(msg):
-	ws.send(json.dumps(msg))
+	try:
+		ws.send(json.dumps(msg))
+	except Exception, e:
+		ws.close()
+	
 
 def on_error(ws, error):
 	#print(error)
@@ -54,28 +57,31 @@ def on_error(ws, error):
 def on_close(ws):
 	print("### closed ###")
 
+def run(*args):
+	time.sleep(3)
+	for i in range(3):
+		time.sleep(1)
+		demandResource(str(i))
+	time.sleep(3)
+	for i in range(3):
+		time.sleep(1)
+		releaseResource(str(i))
+		
+def demandResource(resource):
+	write_message({"type":"demand_resource","resource":resource,"client_id" : myId})
+	resources[resource] = {"locked":True,"release_key":""}
 
-def on_open(ws):
-	global myId
-	def run(*args):
-		time.sleep(3)
-		for i in range(3):
-			time.sleep(1)
-			write_message({"type":"demand_resource","resource":str(i),"client_id" : myId})
-			resources[str(i)] = {"locked":True,"release_key":""}
-		time.sleep(3)
-		for i in range(3):
-			time.sleep(1)
-			write_message({"type":"release_resource","resource":str(i),"client_id" : myId , "release_key" : resources[str(i)]["release_key"]})
-
-	thread.start_new_thread(run, ())
+def releaseResource(resource):
+	write_message({"type":"release_resource","resource":resource,"client_id" : myId , "release_key" : resources[resource]["release_key"]})
+	if resource in resources :
+		del resources[resource] 
 
 if __name__ == "__main__":
+	thread.start_new_thread(run, ())
 	websocket.enableTrace(True)
 	host = "ws://127.0.0.1:9191/central_locking"
 	ws = websocket.WebSocketApp(host,
                                 on_message=on_message,
                                 on_error=on_error,
                                 on_close=on_close)
-	ws.on_open = on_open
 	ws.run_forever()

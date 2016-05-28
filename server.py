@@ -13,6 +13,7 @@ from threading import Timer
 resources = {}
 clients = {}
 
+
 def checkTimeOut():
     for resource in resources :
         if resources[resource]['current_user']:
@@ -111,7 +112,7 @@ class CentralLockingHandler(tornado.websocket.WebSocketHandler):
 
     def on_message(self, message):
         message = dict(json.loads(message))
-        print message
+
         if "type" in message :
             msgType = message['type']
             #print msgType
@@ -160,7 +161,8 @@ class CentralLockingHandler(tornado.websocket.WebSocketHandler):
                     else :
                         pushWaitingUser(message['resource'])
             #print str(resources)
-
+        print message
+        print resources
     def close(self, code=None, reason=None):
         if self.client_id in clients :
             del clients[self.client_id]
@@ -180,12 +182,12 @@ class PeriodicTask(object):
         t.daemon = self.daemon
         t.start()
 
+if __name__ == '__main__':
+    app = tornado.web.Application([(r'/',MainHandler),(r'/central_locking',CentralLockingHandler)])
 
-app = tornado.web.Application([(r'/',MainHandler),(r'/central_locking',CentralLockingHandler)])
-
-timeoutThread = PeriodicTask(interval=5, callback=checkTimeOut)
-timeoutThread.run()
-server = tornado.httpserver.HTTPServer(app)
-server.listen(9191)
-tornado.ioloop.IOLoop.current().start()
+    timeoutThread = PeriodicTask(interval=5, callback=checkTimeOut)
+    timeoutThread.run()
+    server = tornado.httpserver.HTTPServer(app)
+    server.listen(9191)
+    tornado.ioloop.IOLoop.current().start()
 
