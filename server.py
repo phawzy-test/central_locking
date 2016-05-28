@@ -16,18 +16,35 @@ clients = {}
 def checkTimeOut():
     for resource in resources :
         if resources[resource]['current_user']:
-            if (datetime.now()-resources[resource]['current_user']["last_request"]).total_seconds()>1.5 :  # big value not real time
+
+            if  resources[resource]['current_user']["last_request"] and (datetime.now()-resources[resource]['current_user']["last_request"]).total_seconds()>1.5 :  # big value not real time
                 sentMsg = {"type" : "error" , "resource" : resource, "status" : "timeout"}
-                clients[resources[resource]["current_user"]['id']].write_message(sentMsg)
-                pushWaitingUser(resource)
+                try:
+                    clients[resources[resource]["current_user"]['id']].write_message(sentMsg)
+                except Exception, e:
+                    if resources[resource]["current_user"]['id'] in clients :
+                        del clients[resources[resource]["current_user"]['id']]
+                finally:
+                    pushWaitingUser(resource)
             for index, waiting_client in enumerate(resources[resource]['accessQueue']):
                 if (datetime.now() - waiting_client['demanded_at']).total_seconds() > 3 :    # big value not real time
                     sentMsg = {"type" : "error" , "resource" : resource, "status" : "timeout"}
-                    clients[resources[resource]["accessQueue"][index]].write_message(sentMsg)
-                    del resources[resource]["accessQueue"][index]
+                    try:
+                        clients[resources[resource]["accessQueue"][index]['id']].write_message(sentMsg)
+                    except Exception, e:
+                        if resources[resource]["accessQueue"][index]['id'] in clients :
+                            del clients[resources[resource]["accessQueue"][index]['id']]
+                    finally:
+                        del resources[resource]["accessQueue"][index]
+                    
 
             sentMsg = {"type" : "check_resource" , "resource" : resource, "release_key" : resources[resource]['release_key']}
-            clients[resources[resource]["current_user"]['id']].write_message(sentMsg)
+            try:
+                clients[resources[resource]["current_user"]['id']].write_message(sentMsg)
+            except Exception, e:
+                if resources[resource]["current_user"]['id'] in clients :
+                    del clients[resources[resource]["current_user"]['id']]
+            
 
 
 def pushWaitingUser(resource):
@@ -36,7 +53,12 @@ def pushWaitingUser(resource):
         resources[resource]["current_user"]={"id" : newClientId, "last_request" : datetime.now()}
         del resources[resource]["accessQueue"][0]
         sentMsg = {"type" : "use_resource" , "resource" : resource, "release_key" : resources[resource]['release_key']}
-        clients[newClientId].write_message(sentMsg)
+        try:
+            clients[newClientId].write_message(sentMsg)
+        except Exception, e:
+            if newClientId in clients :
+                del clients[newClientId]
+
     else:
         resources[resource]["current_user"] = {}
 
@@ -46,12 +68,25 @@ def detectDeadlock (client_id, demandedResource):  # detect simple deadlock not 
         if resources[resource]["current_user"]['id'] == client_id:
             for index, waiting_client in enumerate(resources[resource]['accessQueue']):
                 if waiting_client['id'] == resources[demandedResource]["current_user"]['id'] :   # if deadlock send messages to both services causing deadlock
-                    print "deadlock at "+ demandedResource + " and "+resource
+                    #print "deadlock at "+ demandedResource + " and "+resource
                     sentMsg = {"type" : "error" , "resource" : demandedResource, "status" : "deadlock"}
-                    clients[client_id].write_message(sentMsg)
+                    try:
+                        clients[client_id].write_message(sentMsg)
+                    except Exception, e:
+                        if client_id in clients :
+                            del clients[client_id]
+                    
                     sentMsg = {"type" : "error" , "resource" : resource, "status" : "deadlock"}
-                    clients[resources[demandedResource]["current_user"]['id']].write_message(sentMsg)
+                    try:
+                        clients[resources[demandedResource]["current_user"]['id']].write_message(sentMsg)
+                        handleDeadlock(waiting_client['id'],demandedResource,client_id,resource)
+                    except Exception, e:
+                        if client_id in clients :
+                            del clients[client_id]                    
                     #del resources[resource]["accessQueue"][index]
+    
+
+def handleDeadlock(client_id1,resource1,client_id2,resource2):
     pass
 
 
@@ -68,36 +103,46 @@ class CentralLockingHandler(tornado.websocket.WebSocketHandler):
         self.client_id = str(uuid.uuid4())
         clients[self.client_id]= self
         sentMsg = {"type" : "connection_details" , "client_id" : self.client_id}
-        self.write_message(sentMsg)
+        try:
+            self.write_message(sentMsg)
+        except Exception, e:
+            self.close()
+        
 
     def on_message(self, message):
         message = dict(json.loads(message))
         msgType = message['type']
-        print msgType
+        #print msgType
         
         if msgType == "demand_resource":
 
             if message['resource'] not in resources.keys() :
                 release_key = str(uuid.uuid4())+str(uuid.uuid4())
-                print release_key
+                #print release_key
                 resources[message['resource']] = {"current_user" : {"id" : self.client_id , "last_request" : datetime.now()} , "accessQueue" : [] , "release_key" : release_key}
                 sentMsg = {"type" : "use_resource" , "resource" : message['resource'], "release_key" : release_key}
-                self.write_message(sentMsg)
+                try:
+                    self.write_message(sentMsg)
+                except Exception, e:
+                    self.close()
 
             elif not resources[message['resource']]["current_user"] :
                 resources[message['resource']]["current_user"] = {"id" : self.client_id, "last_request" : datetime.now()}
                 sentMsg = {"type" : "use_resource" , "resource" : message['resource'], "release_key" : resources[message['resource']]['release_key']}
-                self.write_message(sentMsg)
+                try:
+                    self.write_message(sentMsg)
+                except Exception, e:
+                    self.close()
 
             elif not ( any(waiting_client['id'] == self.client_id for waiting_client in resources[message['resource']]["accessQueue"]) or resources[message['resource']]["current_user"]['id'] == self.client_id )  :
                 resources[message['resource']]["accessQueue"].append({"id" : self.client_id, "demanded_at" : datetime.now()})
                 detectDeadlock(self.client_id, message['resource'])
 
         elif msgType == "release_resource":
-            print "release message body "+str(message)
-            print "resource to be released" + str (resources[message['resource']])
+            #print "release message body "+str(message)
+            #print "resource to be released" + str (resources[message['resource']])
             if message['resource'] in resources.keys()  and message['release_key'] == resources[message['resource']]['release_key'] and self.client_id == resources[message['resource']]['current_user']['id'] :
-                print "release me man"
+                #print "release me man"
                 pushWaitingUser (message['resource'])
 
         elif msgType == "check_resource_response":  # is needed at all ?! yes
@@ -106,46 +151,39 @@ class CentralLockingHandler(tornado.websocket.WebSocketHandler):
 
         elif msgType == "use_resource_response":
             if message['resource'] in resources.keys()  and message['release_key'] == resources[message['resource']]['release_key'] and self.client_id == resources[message['resource']]['current_user']['id'] :
-                print message["status"]
+                #print message["status"]
                 if message['status'] == "ok" :
                     
                     resources[message['resource']]["current_user"]["last_request"] = ""
                 else :
                     pushWaitingUser(message['resource'])
-            
-        print str(resources)
+        #print str(resources)
+
     def close(self, code=None, reason=None):
-        del clients[self.client_id]
-        pass # check if client is in que or currently using any resources
+        if self.client_id in clients :
+            del clients[self.client_id]
+            pass # check if client is in que or currently using any resources
 
 
-class RepeatedTimer(object):
-    def __init__(self, interval, function, *args, **kwargs):
-        self._timer     = None
-        self.interval   = interval
-        self.function   = function
-        self.args       = args
-        self.kwargs     = kwargs
-        self.is_running = False
-        self.start()
+class PeriodicTask(object):
+    def __init__(self, interval, callback, daemon=True, **kwargs):
+        self.interval = interval
+        self.callback = callback
+        self.daemon   = daemon
+        self.kwargs   = kwargs
 
-    def _run(self):
-        self.is_running = False
-        self.start()
-        self.function(*self.args, **self.kwargs)
+    def run(self):
+        self.callback(**self.kwargs)
+        t = Timer(self.interval, self.run)
+        t.daemon = self.daemon
+        t.start()
 
-    def start(self):
-        if not self.is_running:
-            self._timer = Timer(self.interval, self._run)
-            self._timer.start()
-            self.is_running = True
-
-    def stop(self):
-        self._timer.cancel()
-        self.is_running = False
 
 app = tornado.web.Application([(r'/',MainHandler),(r'/central_locking',CentralLockingHandler)])
+
+timeoutThread = PeriodicTask(interval=5, callback=checkTimeOut)
+timeoutThread.run()
 server = tornado.httpserver.HTTPServer(app)
 server.listen(9191)
 tornado.ioloop.IOLoop.current().start()
-#rt = RepeatedTimer(5, checkTimeOut)
+
