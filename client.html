@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Chat</title>
+</head>
+<body>
+<div id="msg" style="width: 300px;height: 100px;border: 1px"></div><br>
+Resource To Be Demanded<input id="demanded_resource" type="text">
+<button id="demandbut" >Demand</button><br>
+Resource To Be Demanded<input id="released_resource" type="text">
+<button id="releasebut" >Release</button><br>
+
+<script>
+    var msgBox=document.getElementById("msg");
+    var demandBut=document.getElementById("demandbut");
+    var releaseBut=document.getElementById("releasebut");
+    var ws=new WebSocket("ws://localhost:9191/central_locking");
+    var demandedResource;
+    var releasedResource;
+
+    var my_id;
+    var resources_locks = {}
+
+    demandBut.addEventListener("click",function(){
+        demandedResource=document.getElementById("demanded_resource");
+        var sentMsg={"resource":demandedResource.value,"client_id" : my_id,"type":"demand_resource"}
+        ws.send(JSON.stringify(sentMsg));
+    });   
+
+    releaseBut.addEventListener("click",function(){
+        releasedResource=document.getElementById("released_resource");
+        var sentMsg={"resource":releasedResource.value,"client_id" : my_id,"type":"release_resource","release_key":resources_locks[releasedResource.value]["release_key"]}
+        ws.send(JSON.stringify(sentMsg));
+    }); 
+
+    ws.onmessage=function(ev){
+        var receivedMsg=JSON.parse(ev.data);
+        var status;
+        if (receivedMsg.type == "check_resource") {
+            var sentMsg={"resource":receivedMsg.resource,"client_id" : my_id,"type":"check_resource_response","release_key" : receivedMsg.release_key};
+            ws.send(JSON.stringify(sentMsg));
+        }
+        else if(receivedMsg.type == "use_resource"){
+            resources_locks[receivedMsg.resource] = {"locked" : false , "release_key" : receivedMsg.release_key}
+            var sentMsg={"resource":receivedMsg.resource,"release_key" : receivedMsg.release_key,"client_id" : my_id,"type":"use_resource_response","status":"ok"}
+            ws.send(JSON.stringify(sentMsg));
+        }
+        else if (receivedMsg.type == "connection_details") {
+            my_id = receivedMsg.client_id
+        }else if(receivedMsg.type == "error"){
+            if (receivedMsg.status == "timeout"){
+                alert("timeout on resource"+receivedMsg.resource)
+            }else if(receivedMsg.status == "deadlock"){
+                alert("deadlock on "+receivedMsg.resource)
+            }
+        }
+        
+    };
+</script>
+</body>
+</html>
