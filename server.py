@@ -111,53 +111,55 @@ class CentralLockingHandler(tornado.websocket.WebSocketHandler):
 
     def on_message(self, message):
         message = dict(json.loads(message))
-        msgType = message['type']
-        #print msgType
-        
-        if msgType == "demand_resource":
+        print message
+        if "type" in message :
+            msgType = message['type']
+            #print msgType
+            
+            if msgType == "demand_resource":
 
-            if message['resource'] not in resources.keys() :
-                release_key = str(uuid.uuid4())+str(uuid.uuid4())
-                #print release_key
-                resources[message['resource']] = {"current_user" : {"id" : self.client_id , "last_request" : datetime.now()} , "accessQueue" : [] , "release_key" : release_key}
-                sentMsg = {"type" : "use_resource" , "resource" : message['resource'], "release_key" : release_key}
-                try:
-                    self.write_message(sentMsg)
-                except Exception, e:
-                    self.close()
+                if message['resource'] not in resources.keys() :
+                    release_key = str(uuid.uuid4())+str(uuid.uuid4())
+                    #print release_key
+                    resources[message['resource']] = {"current_user" : {"id" : self.client_id , "last_request" : datetime.now()} , "accessQueue" : [] , "release_key" : release_key}
+                    sentMsg = {"type" : "use_resource" , "resource" : message['resource'], "release_key" : release_key}
+                    try:
+                        self.write_message(sentMsg)
+                    except Exception, e:
+                        self.close()
 
-            elif not resources[message['resource']]["current_user"] :
-                resources[message['resource']]["current_user"] = {"id" : self.client_id, "last_request" : datetime.now()}
-                sentMsg = {"type" : "use_resource" , "resource" : message['resource'], "release_key" : resources[message['resource']]['release_key']}
-                try:
-                    self.write_message(sentMsg)
-                except Exception, e:
-                    self.close()
+                elif not resources[message['resource']]["current_user"] :
+                    resources[message['resource']]["current_user"] = {"id" : self.client_id, "last_request" : datetime.now()}
+                    sentMsg = {"type" : "use_resource" , "resource" : message['resource'], "release_key" : resources[message['resource']]['release_key']}
+                    try:
+                        self.write_message(sentMsg)
+                    except Exception, e:
+                        self.close()
 
-            elif not ( any(waiting_client['id'] == self.client_id for waiting_client in resources[message['resource']]["accessQueue"]) or resources[message['resource']]["current_user"]['id'] == self.client_id )  :
-                resources[message['resource']]["accessQueue"].append({"id" : self.client_id, "demanded_at" : datetime.now()})
-                detectDeadlock(self.client_id, message['resource'])
+                elif not ( any(waiting_client['id'] == self.client_id for waiting_client in resources[message['resource']]["accessQueue"]) or resources[message['resource']]["current_user"]['id'] == self.client_id )  :
+                    resources[message['resource']]["accessQueue"].append({"id" : self.client_id, "demanded_at" : datetime.now()})
+                    detectDeadlock(self.client_id, message['resource'])
 
-        elif msgType == "release_resource":
-            #print "release message body "+str(message)
-            #print "resource to be released" + str (resources[message['resource']])
-            if message['resource'] in resources.keys()  and message['release_key'] == resources[message['resource']]['release_key'] and self.client_id == resources[message['resource']]['current_user']['id'] :
-                #print "release me man"
-                pushWaitingUser (message['resource'])
+            elif msgType == "release_resource":
+                #print "release message body "+str(message)
+                #print "resource to be released" + str (resources[message['resource']])
+                if message['resource'] in resources.keys()  and message['release_key'] == resources[message['resource']]['release_key'] and self.client_id == resources[message['resource']]['current_user']['id'] :
+                    #print "release me man"
+                    pushWaitingUser (message['resource'])
 
-        elif msgType == "check_resource_response":  # is needed at all ?! yes
-            if message['resource'] in resources.keys()  and message['release_key'] == resources[message['resource']]['release_key'] and self.client_id == resources[message['resource']]['current_user']['id'] :
-                resources[message['resource']]["current_user"]["last_request"] = ""
-
-        elif msgType == "use_resource_response":
-            if message['resource'] in resources.keys()  and message['release_key'] == resources[message['resource']]['release_key'] and self.client_id == resources[message['resource']]['current_user']['id'] :
-                #print message["status"]
-                if message['status'] == "ok" :
-                    
+            elif msgType == "check_resource_response":  # is needed at all ?! yes
+                if message['resource'] in resources.keys()  and message['release_key'] == resources[message['resource']]['release_key'] and self.client_id == resources[message['resource']]['current_user']['id'] :
                     resources[message['resource']]["current_user"]["last_request"] = ""
-                else :
-                    pushWaitingUser(message['resource'])
-        #print str(resources)
+
+            elif msgType == "use_resource_response":
+                if message['resource'] in resources.keys()  and message['release_key'] == resources[message['resource']]['release_key'] and self.client_id == resources[message['resource']]['current_user']['id'] :
+                    #print message["status"]
+                    if message['status'] == "ok" :
+                        
+                        resources[message['resource']]["current_user"]["last_request"] = ""
+                    else :
+                        pushWaitingUser(message['resource'])
+            #print str(resources)
 
     def close(self, code=None, reason=None):
         if self.client_id in clients :
