@@ -1,0 +1,295 @@
+From 35bc04b9722eff99903392411c810e837da99c79 Mon Sep 17 00:00:00 2001
+From: Mohamed Elawadi <mohamed@elawadi.net>
+Date: Sun, 29 May 2016 06:43:47 +0200
+Subject: [PATCH] add highlevel api to the client
+
+---
+ RemoteFile.py | 17 +++++++++++++++++
+ client.py     | 48 ++++++++++++++++++++++++++++++++++--------------
+ example.py    |  6 ++++++
+ server.py     | 38 +++++++++++++++++++-------------------
+ 4 files changed, 76 insertions(+), 33 deletions(-)
+ create mode 100644 RemoteFile.py
+ create mode 100755 example.py
+
+diff --git a/RemoteFile.py b/RemoteFile.py
+new file mode 100644
+index 0000000..a1f28de
+--- /dev/null
++++ b/RemoteFile.py
+@@ -0,0 +1,17 @@
++import client
++client.start()
++
++class RemoteFile:
++    def __init__(self, filename, *args, **kwargs):
++        self.filename = filename
++        self.args = args
++        self.kwargs = kwargs
++    def __enter__(self):
++        o = client.demandResource(self.filename)
++        o["lock"].acquire()
++        return self
++    def __exit__(self, exc_type, exc_val, exc_tb):
++        client.releaseResource(self.filename)
++    def read(self, n=0):
++        print("print el rannat")
++        pass
+diff --git a/client.py b/client.py
+index 20dd7be..80f915a 100644
+--- a/client.py
++++ b/client.py
+@@ -1,17 +1,21 @@
+ import websocket
+ import json
+-import thread
++try:
++	import thread
++except ImportError:
++	import _thread as thread
+ import time
+ import sys
++import threading
+ 
+ 
+ myId = ""
+-
++ws = None
+ resources = {}
+ 
+ def on_message(ws, message):
+ 	global myId
+-	print(message)
++	#print(message)
+ 	message = dict(json.loads(message))
+ 	if "type" in message :
+ 
+@@ -19,7 +23,8 @@ def on_message(ws, message):
+ 		if msgType == "use_resource":
+ 
+ 			if message['resource'] in resources :
+-				resources[message['resource']]={"locked" : False, "release_key": message['release_key']}
++				resources[message['resource']]["lock"].release()
++				resources[message['resource']]["release_key"] = message['release_key']
+ 				status = "ok"
+ 			else :
+ 				status = "Fail"
+@@ -38,20 +43,20 @@ def on_message(ws, message):
+ 			if message['status'] == "timeout":
+ 				if resource in resources :
+ 					del resources[resource] 
+-				print "timeout on "+ message['resource']
++				print("timeout on "+ message['resource'])
+ 
+ 			elif message['status'] == "deadlock":
+-				print "deadlock on "+message['resource']
++				print("deadlock on "+message['resource'])
+ 
+ def write_message(msg):
+ 	try:
+ 		ws.send(json.dumps(msg))
+-	except Exception, e:
++	except Exception as e:
+ 		ws.close()
+ 	
+ 
+ def on_error(ws, error):
+-	#print(error)
++	print(error)
+ 	pass
+ 
+ def on_close(ws):
+@@ -69,19 +74,34 @@ def run(*args):
+ 		
+ def demandResource(resource):
+ 	write_message({"type":"demand_resource","resource":resource,"client_id" : myId})
+-	resources[resource] = {"locked":True,"release_key":""}
++	lock = threading.Lock()
++	lock.acquire()
++	resources[resource] = {"lock":lock,"release_key":""}
++	return resources[resource]
+ 
+ def releaseResource(resource):
+ 	write_message({"type":"release_resource","resource":resource,"client_id" : myId , "release_key" : resources[resource]["release_key"]})
+ 	if resource in resources :
+ 		del resources[resource] 
+ 
+-if __name__ == "__main__":
+-	thread.start_new_thread(run, ())
+-	websocket.enableTrace(True)
++def start():
++	global ws
++	#thread.start_new_thread(run, ())
++	#websocket.enableTrace(True)
+ 	host = "ws://127.0.0.1:9191/central_locking"
++	l = threading.Lock()
++	l.acquire()
++	def on_open(ws):
++		l.release()
+ 	ws = websocket.WebSocketApp(host,
+                                 on_message=on_message,
+                                 on_error=on_error,
+-                                on_close=on_close)
+-	ws.run_forever()
+\ No newline at end of file
++                                on_close=on_close,
++				on_open=on_open)
++	def pla():
++		ws.run_forever()
++	thread.start_new_thread(pla, ())
++	l.acquire()
++
++if __name__ == "__main__":
++	start()
+diff --git a/example.py b/example.py
+new file mode 100755
+index 0000000..df0b8d5
+--- /dev/null
++++ b/example.py
+@@ -0,0 +1,6 @@
++#!/usr/bin/env python
++
++from RemoteFile import RemoteFile
++
++with RemoteFile('/asd/asd') as f:
++    f.read()
+diff --git a/server.py b/server.py
+index 0f76c44..82c6de1 100644
+--- a/server.py
++++ b/server.py
+@@ -22,7 +22,7 @@ def checkTimeOut():
+                 sentMsg = {"type" : "error" , "resource" : resource, "status" : "timeout"}
+                 try:
+                     clients[resources[resource]["current_user"]['id']].write_message(sentMsg)
+-                except Exception, e:
++                except Exception as e:
+                     if resources[resource]["current_user"]['id'] in clients :
+                         del clients[resources[resource]["current_user"]['id']]
+                 finally:
+@@ -32,7 +32,7 @@ def checkTimeOut():
+                     sentMsg = {"type" : "error" , "resource" : resource, "status" : "timeout"}
+                     try:
+                         clients[resources[resource]["accessQueue"][index]['id']].write_message(sentMsg)
+-                    except Exception, e:
++                    except Exception as e:
+                         if resources[resource]["accessQueue"][index]['id'] in clients :
+                             del clients[resources[resource]["accessQueue"][index]['id']]
+                     finally:
+@@ -42,7 +42,7 @@ def checkTimeOut():
+             sentMsg = {"type" : "check_resource" , "resource" : resource, "release_key" : resources[resource]['release_key']}
+             try:
+                 clients[resources[resource]["current_user"]['id']].write_message(sentMsg)
+-            except Exception, e:
++            except Exception as e:
+                 if resources[resource]["current_user"]['id'] in clients :
+                     del clients[resources[resource]["current_user"]['id']]
+             
+@@ -56,7 +56,7 @@ def pushWaitingUser(resource):
+         sentMsg = {"type" : "use_resource" , "resource" : resource, "release_key" : resources[resource]['release_key']}
+         try:
+             clients[newClientId].write_message(sentMsg)
+-        except Exception, e:
++        except Exception as e:
+             if newClientId in clients :
+                 del clients[newClientId]
+ 
+@@ -69,11 +69,11 @@ def detectDeadlock (client_id, demandedResource):  # detect simple deadlock not
+         if resources[resource]["current_user"]['id'] == client_id:
+             for index, waiting_client in enumerate(resources[resource]['accessQueue']):
+                 if waiting_client['id'] == resources[demandedResource]["current_user"]['id'] :   # if deadlock send messages to both services causing deadlock
+-                    #print "deadlock at "+ demandedResource + " and "+resource
++                    #print("deadlock at "+ demandedResource + " and "+resource)
+                     sentMsg = {"type" : "error" , "resource" : demandedResource, "status" : "deadlock"}
+                     try:
+                         clients[client_id].write_message(sentMsg)
+-                    except Exception, e:
++                    except Exception as e:
+                         if client_id in clients :
+                             del clients[client_id]
+                     
+@@ -81,7 +81,7 @@ def detectDeadlock (client_id, demandedResource):  # detect simple deadlock not
+                     try:
+                         clients[resources[demandedResource]["current_user"]['id']].write_message(sentMsg)
+                         handleDeadlock(waiting_client['id'],demandedResource,client_id,resource)
+-                    except Exception, e:
++                    except Exception as e:
+                         if client_id in clients :
+                             del clients[client_id]                    
+                     #del resources[resource]["accessQueue"][index]
+@@ -106,7 +106,7 @@ class CentralLockingHandler(tornado.websocket.WebSocketHandler):
+         sentMsg = {"type" : "connection_details" , "client_id" : self.client_id}
+         try:
+             self.write_message(sentMsg)
+-        except Exception, e:
++        except Exception as e:
+             self.close()
+         
+ 
+@@ -115,18 +115,18 @@ class CentralLockingHandler(tornado.websocket.WebSocketHandler):
+ 
+         if "type" in message :
+             msgType = message['type']
+-            #print msgType
++            #print(msgType)
+             
+             if msgType == "demand_resource":
+ 
+                 if message['resource'] not in resources.keys() :
+                     release_key = str(uuid.uuid4())+str(uuid.uuid4())
+-                    #print release_key
++                    #print(release_key)
+                     resources[message['resource']] = {"current_user" : {"id" : self.client_id , "last_request" : datetime.now()} , "accessQueue" : [] , "release_key" : release_key}
+                     sentMsg = {"type" : "use_resource" , "resource" : message['resource'], "release_key" : release_key}
+                     try:
+                         self.write_message(sentMsg)
+-                    except Exception, e:
++                    except Exception as e:
+                         self.close()
+ 
+                 elif not resources[message['resource']]["current_user"] :
+@@ -134,7 +134,7 @@ class CentralLockingHandler(tornado.websocket.WebSocketHandler):
+                     sentMsg = {"type" : "use_resource" , "resource" : message['resource'], "release_key" : resources[message['resource']]['release_key']}
+                     try:
+                         self.write_message(sentMsg)
+-                    except Exception, e:
++                    except Exception as e:
+                         self.close()
+ 
+                 elif not ( any(waiting_client['id'] == self.client_id for waiting_client in resources[message['resource']]["accessQueue"]) or resources[message['resource']]["current_user"]['id'] == self.client_id )  :
+@@ -142,10 +142,10 @@ class CentralLockingHandler(tornado.websocket.WebSocketHandler):
+                     detectDeadlock(self.client_id, message['resource'])
+ 
+             elif msgType == "release_resource":
+-                #print "release message body "+str(message)
+-                #print "resource to be released" + str (resources[message['resource']])
++                #print("release message body "+str(message))
++                #print("resource to be released" + str (resources[message['resource']]))
+                 if message['resource'] in resources.keys()  and message['release_key'] == resources[message['resource']]['release_key'] and self.client_id == resources[message['resource']]['current_user']['id'] :
+-                    #print "release me man"
++                    #print("release me man")
+                     pushWaitingUser (message['resource'])
+ 
+             elif msgType == "check_resource_response":  # is needed at all ?! yes
+@@ -154,15 +154,15 @@ class CentralLockingHandler(tornado.websocket.WebSocketHandler):
+ 
+             elif msgType == "use_resource_response":
+                 if message['resource'] in resources.keys()  and message['release_key'] == resources[message['resource']]['release_key'] and self.client_id == resources[message['resource']]['current_user']['id'] :
+-                    #print message["status"]
++                    #print(message["status"])
+                     if message['status'] == "ok" :
+                         
+                         resources[message['resource']]["current_user"]["last_request"] = ""
+                     else :
+                         pushWaitingUser(message['resource'])
+-            #print str(resources)
+-        print message
+-        print resources
++            #print(str(resources))
++        print(message)
++        print(resources)
+     def close(self, code=None, reason=None):
+         if self.client_id in clients :
+             del clients[self.client_id]
+-- 
+2.5.0
+

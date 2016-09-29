@@ -20,7 +20,7 @@ def on_message(ws, message):
 		if msgType == "use_resource":
 
 			if message['resource'] in resources :
-                                resources[message['resource']]["lock"].releasse()
+				resources[message['resource']]["lock"].release()
 				resources[message['resource']]["release_key"] = message['release_key']
 				status = "ok"
 			else :
@@ -38,7 +38,7 @@ def on_message(ws, message):
 
 		elif msgType == "error":
 			if message['status'] == "timeout":
-				if resource in resources :
+				if message['resource'] in resources :
 					del resources[resource] 
 				print "timeout on "+ message['resource']
 
